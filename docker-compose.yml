@@ -1,0 +1,28 @@
+services:
+  api:
+    build: .
+    container_name: medical-rag-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      TEMP_UPLOAD_DIR: /app/tmp_uploads
+    volumes:
+      - rag_uploads:/app/tmp_uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: medical-rag-ui
+    ports:
+      - "3000:3000"
+
+
+    restart: unless-stopped
+
+volumes:
+  rag_uploads:
