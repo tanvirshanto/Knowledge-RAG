@@ -71,6 +71,12 @@ class IngestionWorker:
         logger.info("Worker picked up job %s: %s", job_id, original_filename)
 
         try:
+            if not pdf_path.exists():
+                raise FileNotFoundError(
+                    f"PDF file not found on disk at {pdf_path}. "
+                    "The server may have restarted and lost the temporary file. Please re-upload the document."
+                )
+
             await asyncio.to_thread(
                 run_ingestion_pipeline,
                 job_id=job_id,

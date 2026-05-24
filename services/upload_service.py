@@ -54,6 +54,22 @@ class UploadService:
     def update_job_status(self, job_id: str, status: str, **fields) -> None:
         self.upload_repo.update_status(job_id, status, **fields)
 
+    def retry_job(self, job_id: str) -> Optional[UploadJobResponse]:
+        record = self.upload_repo.get_by_id(job_id)
+        if record is None:
+            return None
+        self.upload_repo.update_status(
+            job_id,
+            "QUEUED",
+            error_message=None,
+            started_at=None,
+            completed_at=None,
+            total_pages=None,
+            total_chunks=None,
+        )
+        updated_record = self.upload_repo.get_by_id(job_id)
+        return self._to_response(updated_record) if updated_record else None
+
     def _to_response(self, record: dict) -> UploadJobResponse:
         return UploadJobResponse(
             id=record.get("id", ""),

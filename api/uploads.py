@@ -86,3 +86,16 @@ def get_upload(job_id: str):
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload job not found")
     return job
+
+
+@router.post("/{job_id}/retry", response_model=UploadJobResponse)
+def retry_upload(
+    job_id: str,
+    current_user: dict = Depends(require_maintainer),
+):
+    service = UploadService()
+    job = service.retry_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload job not found")
+    logger.info("Queued retry for upload job %s by %s", job_id, current_user["sub"])
+    return job
