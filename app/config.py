@@ -20,10 +20,9 @@ class Settings(BaseSettings):
     qdrant_api_key: str
     qdrant_collection_name: str = "medical_textbooks"
 
-    # Command Code Provider API (OpenAI-compatible)
-    command_code_api_key: str
-    command_code_base_url: str = "https://api.commandcode.ai/provider/v1"
-    command_code_model: str = "deepseek/deepseek-v4-flash"
+    # Google Gemini API
+    gemini_api_key: str
+    gemini_model: str = "gemini-2.0-flash"
     llm_temperature: float = 0.1
 
     # Context-injected chunking

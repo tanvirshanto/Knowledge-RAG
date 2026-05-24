@@ -1,6 +1,6 @@
-# Medical RAG Service (Docling + BGE-M3 + Qdrant + Command Code)
+# Medical RAG Service (Docling + BGE-M3 + Qdrant + Gemini)
 
-Production FastAPI backend for medical textbook RAG: local Docling PDF parsing (with OCR), BGE-M3 embeddings, Qdrant Cloud vectors, and Command Code Provider API for reasoning.
+Production FastAPI backend for medical textbook RAG: local Docling PDF parsing (with OCR), BGE-M3 embeddings, Qdrant Cloud vectors, and Google Gemini for reasoning.
 
 ## Quick start
 
@@ -151,8 +151,8 @@ See `.env.example`. Important settings:
 - `EMBEDDING_BATCH_SIZE`: encode batch size (default `32`; lower if CPU RAM is tight)
 - `CHUNK_SIZE` / `CHUNK_OVERLAP`: context-injected chunks (defaults `1000` / `150`)
 - `RETRIEVAL_TOP_K`: 5–8 recommended (default `6`)
-- `COMMAND_CODE_API_KEY`: from [Command Code Studio → API Keys](https://commandcode.ai/studio/) (Pro plan+)
-- `COMMAND_CODE_MODEL`: e.g. `deepseek/deepseek-v4-flash` or `deepseek/deepseek-v4-pro` ([model list](https://commandcode.ai/docs/provider-api))
+- `GEMINI_API_KEY`: from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- `GEMINI_MODEL`: default `gemini-2.0-flash`
 - `LLM_TEMPERATURE`: `0.1` for low hallucination risk
 
 ## Architecture
@@ -160,7 +160,7 @@ See `.env.example`. Important settings:
 ```
 PDF → Docling (markdown + OCR) → context-injected markdown chunking
     → BGE-M3 embed (document) → Qdrant (cosine, 1024-dim)
-Query → BGE-M3 embed (query) → Qdrant top-k → Command Code LLM (context-only prompt)
+Query → BGE-M3 embed (query) → Qdrant top-k → Gemini LLM (context-only prompt)
 ```
 
 Temporary PDFs are deleted in a `finally` block after ingestion completes or fails.

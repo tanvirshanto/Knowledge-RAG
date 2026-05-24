@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 from app.config import get_settings
 from app.services.embeddings import get_embedding_service
-from app.services.llm import CommandCodeLLM
+from app.services.llm import GeminiLLM
 from app.services.vector_store import get_vector_store
 
 
@@ -24,11 +24,11 @@ def retrieve_contexts(question: str) -> list[dict]:
 def stream_answer_question(question: str) -> Iterator[str]:
     settings = get_settings()
     contexts = retrieve_contexts(question)
-    llm = CommandCodeLLM(settings)
+    llm = GeminiLLM(settings)
     yield from llm.stream_answer(question, contexts)
 
 
 def answer_question(question: str) -> str:
     settings = get_settings()
     contexts = retrieve_contexts(question)
-    return CommandCodeLLM(settings).answer(question, contexts)
+    return GeminiLLM(settings).answer(question, contexts)

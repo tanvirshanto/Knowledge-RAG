@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Medical RAG Service",
-    description="Production RAG backend for medical textbooks (Docling + BGE-M3 + Qdrant + Command Code)",
+    description="Production RAG backend for medical textbooks (Docling + BGE-M3 + Qdrant + Gemini)",
     version="1.0.0",
 )
 
