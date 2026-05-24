@@ -16,15 +16,18 @@ Rules:
 2. Do NOT use prior knowledge, assumptions, or external medical information.
 3. If the answer cannot be fully determined from the context, respond exactly with:
    "Information not found in the provided medical context."
-4. Cite the actual chapter and page inline for every factual statement using this format:
-   "(Chapter 3, Page 12)"
-5. Do NOT invent citations, references, or page numbers.
-6. If multiple provided context chunks support a statement, cite all relevant references from the retrieved context.
-7. Keep responses concise, accurate, and medically neutral.
-8. Do not provide diagnosis, treatment recommendations, or medical advice unless explicitly stated in the context.
-9. If the context contains conflicting information, clearly mention the conflict instead of choosing one answer.
-10. Do not summarize beyond what is directly supported by the context.
-11. If the retrieved context is incomplete, ambiguous, or unclear, state that the information is unclear based on the provided context.
+4. Citations are ONLY valid if they exactly match the format (Chapter <number>, Page <number>); any other format—including document titles, breadcrumbs, section headers, metadata strings, or chunk identifiers—is strictly invalid and must not be used under any circumstances, and if chapter or page information is missing or not explicitly provided in the retrieved context, no citation should be generated.
+5. Do NOT invent citations, references, source labels, page numbers, chapter names, or document names. 
+6. Never generate generic citations such as "(Document)", "(Source)", or "(Textbook)". If chapter/page metadata is unavailable, do not generate a citation. If the retrieved chunk's breadcrumb contains "# CONTENTS" (e.g., "Document > # CONTENTS"), never use page numbers from that chunk as the source page for medical facts—only for navigation.
+7. If multiple provided context chunks support a statement, cite all relevant references from the retrieved context.
+8. Keep responses concise, accurate, and medically neutral.
+9. Do not provide diagnosis, treatment recommendations, or medical advice unless explicitly stated in the context.
+10. If the context contains conflicting information, clearly mention the conflict instead of choosing one answer.
+11. Do not summarize beyond what is directly supported by the context.
+12. If the retrieved context is incomplete, ambiguous, or unclear, state that the information is unclear based on the provided context.
+13. If a retrieved chunk ends mid-sentence, look for the completion of that sentence in the next retrieved chunks before finalizing the response.
+14. Never generate generic source labels such as "(Document)", "(Source)", "(Textbook)", or "(Article)". Only use citations in the exact required format using actual retrieved chapter/page metadata.
+15. Do not restate or paraphrase information unless it is directly supported by the retrieved context.
 """
 
 NOT_FOUND_ANSWER = "Information not found in the provided medical context."
@@ -32,16 +35,26 @@ NOT_FOUND_ANSWER = "Information not found in the provided medical context."
 
 def build_medical_prompt(question: str, contexts: list[dict]) -> str:
     blocks = []
-    for i, ctx in enumerate(contexts, start=1):
+
+    for ctx in contexts:
         page = ctx.get("page")
         chapter = ctx.get("chapter")
+
         meta_parts = []
+
         if chapter:
             meta_parts.append(f"Chapter: {chapter}")
+
         if page is not None:
             meta_parts.append(f"Page: {page}")
-        meta = " | ".join(meta_parts) if meta_parts else "Source metadata unavailable"
-        blocks.append(f"Source [{meta}]:\n{ctx.get('text', '').strip()}")
+
+        text = ctx.get("text", "").strip()
+
+        if meta_parts:
+            meta = " | ".join(meta_parts)
+            blocks.append(f"Source [{meta}]:\n{text}")
+        else:
+            blocks.append(text)
 
     context_block = "\n\n---\n\n".join(blocks) if blocks else "(no context retrieved)"
 

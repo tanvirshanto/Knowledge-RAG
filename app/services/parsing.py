@@ -24,7 +24,7 @@ def _get_converter() -> DocumentConverter:
     return _converter
 
 
-def parse_pdf_to_markdown(pdf_path: Path, settings: Settings) -> str:
+def parse_pdf_to_markdown(pdf_path: Path, settings: Settings) -> tuple[str, any]:
     """Layout-aware PDF parsing with OCR and table preservation via Docling."""
     _ = settings  # reserved for future parse options
     converter = _get_converter()
@@ -38,4 +38,4 @@ def parse_pdf_to_markdown(pdf_path: Path, settings: Settings) -> str:
     markdown = result.document.export_to_markdown()
     if not markdown or not markdown.strip():
         raise ValueError("Parsed markdown is empty.")
-    return markdown.strip()
+    return markdown.strip(), result.document

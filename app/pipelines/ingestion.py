@@ -18,11 +18,11 @@ def run_ingestion_pipeline(job_id: str, pdf_path: Path, filename: str = "documen
         start_time = datetime.now()
         logger.info("Starting ingestion pipeline for job %s", job_id)
         update_job(job_id, status=JobStatus.PARSING)
-        markdown = parse_pdf_to_markdown(pdf_path, settings)
+        markdown, doc = parse_pdf_to_markdown(pdf_path, settings)
 
         update_job(job_id, status=JobStatus.CHUNKING)
         logger.info("Chunking markdown...")
-        chunks = chunk_markdown(markdown, settings)
+        chunks = chunk_markdown(markdown, settings, doc=doc)
         logger.info("Markdown chunked successfully.")
         if not chunks:
             raise ValueError("No chunks produced from document.")

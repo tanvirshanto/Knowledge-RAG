@@ -27,10 +27,10 @@ class Settings(BaseSettings):
 
     # Context-injected chunking
     chunk_size: int = 1000
-    chunk_overlap: int = 150
+    chunk_overlap: int = 300
 
     # Retrieval
-    retrieval_top_k: int = 6
+    retrieval_top_k: int = 20
 
     # Ingestion
     temp_upload_dir: str = "tmp_uploads"
