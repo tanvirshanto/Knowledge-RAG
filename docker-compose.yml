@@ -8,6 +8,12 @@ services:
       - .env
     environment:
       TEMP_UPLOAD_DIR: /app/tmp_uploads
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
     volumes:
       - rag_uploads:/app/tmp_uploads
     restart: unless-stopped
@@ -20,8 +26,6 @@ services:
     container_name: medical-rag-ui
     ports:
       - "3000:3000"
-
-
     restart: unless-stopped
 
 volumes:

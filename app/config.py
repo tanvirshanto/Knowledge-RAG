@@ -35,6 +35,25 @@ class Settings(BaseSettings):
     # Ingestion
     temp_upload_dir: str = "tmp_uploads"
 
+    # Supabase
+    supabase_url: str
+    supabase_service_key: str
+
+    # JWT Authentication
+    jwt_secret: str
+    access_token_expire_minutes: int = 30
+
+    # Admin seed
+    seed_admin_username: str = "admin"
+    seed_admin_password: str = "Admin@1234"
+    seed_admin_role: str = "maintainer"
+
+    # Worker
+    worker_poll_interval_seconds: int = 60
+
+    # Upload limits
+    max_upload_size_mb: int = 50
+
 
 @lru_cache
 def get_settings() -> Settings:

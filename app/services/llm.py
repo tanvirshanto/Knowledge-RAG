@@ -26,8 +26,7 @@ Rules:
 11. Do not summarize beyond what is directly supported by the context.
 12. If the retrieved context is incomplete, ambiguous, or unclear, state that the information is unclear based on the provided context.
 13. If a retrieved chunk ends mid-sentence, look for the completion of that sentence in the next retrieved chunks before finalizing the response.
-14. Never generate generic source labels such as "(Document)", "(Source)", "(Textbook)", or "(Article)". Only use citations in the exact required format using actual retrieved chapter/page metadata.
-15. Do not restate or paraphrase information unless it is directly supported by the retrieved context.
+14. Do not restate or paraphrase information unless it is directly supported by the retrieved context.
 """
 
 NOT_FOUND_ANSWER = "Information not found in the provided medical context."

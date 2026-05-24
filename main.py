@@ -1,28 +1,62 @@
-import json
 import logging
-import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 
+from api.router import api_router
 from app.config import get_settings
-from app.models import AskRequest, AskResponse, JobStatus, StatusResponse, UploadResponse
-from app.pipelines.ingestion import run_ingestion_pipeline
-from app.pipelines.retrieval import answer_question, stream_answer_question
-from app.state import create_job, get_job
+from middleware.exception import register_exception_handlers
+from middleware.logging import LoggingMiddleware
+from seed import seed_admin_user
+from utils.logging_config import setup_logging
+from utils.file_storage import ensure_upload_dir
+from workers.ingestion_worker import IngestionWorker
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
-logger = logging.getLogger(__name__)
+worker: IngestionWorker | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global worker
+
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    settings = get_settings()
+
+    logger.info("Starting Medical RAG Service...")
+
+    ensure_upload_dir(settings.temp_upload_dir)
+
+    from app.services.embeddings import get_embedding_service
+    logger.info("Pre-warming LocalEmbeddingService (loading %s)...", settings.embedding_model)
+    # get_embedding_service(settings)
+    logger.info("LocalEmbeddingService pre-warmed successfully.")
+
+    from app.services.vector_store import get_vector_store
+    logger.info("Ensuring Qdrant collection '%s' exists...", settings.qdrant_collection_name)
+    get_vector_store(settings).ensure_collection()
+    logger.info("Qdrant collection check complete.")
+
+    # await seed_admin_user()
+
+    worker = IngestionWorker(poll_interval=settings.worker_poll_interval_seconds)
+    await worker.start()
+
+    logger.info("Medical RAG Service started successfully.")
+    yield
+
+    if worker:
+        await worker.stop()
+    logger.info("Medical RAG Service shut down.")
+
 
 app = FastAPI(
     title="Medical RAG Service",
     description="Production RAG backend for medical textbooks (Docling + BGE-M3 + Qdrant + Gemini)",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -36,103 +70,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(LoggingMiddleware)
 
-@app.on_event("startup")
-def startup_event() -> None:
-    settings = get_settings()
-    Path(settings.temp_upload_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Pre-warm LocalEmbeddingService on startup
-    logger.info("Pre-warming LocalEmbeddingService (loading BAAI/bge-m3)...")
-    from app.services.embeddings import get_embedding_service
-    get_embedding_service(settings)
-    logger.info("LocalEmbeddingService pre-warmed successfully.")
+register_exception_handlers(app)
 
-    # Ensure Qdrant collection exists on startup
-    logger.info("Ensuring Qdrant collection '%s' exists...", settings.qdrant_collection_name)
-    from app.services.vector_store import get_vector_store
-    get_vector_store(settings).ensure_collection()
-    logger.info("Qdrant collection check complete.")
+app.include_router(api_router)
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/upload-pdf", response_model=UploadResponse)
-async def upload_pdf(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-) -> UploadResponse:
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-
-    settings = get_settings()
-    job_id = uuid.uuid4().hex
-    create_job(job_id)
-
-    temp_dir = Path(settings.temp_upload_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    dest = temp_dir / f"{job_id}.pdf"
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    dest.write_bytes(content)
-
-    background_tasks.add_task(run_ingestion_pipeline, job_id, dest, file.filename)
-    logger.info("Queued ingestion job %s for %s", job_id, file.filename)
-
-    return UploadResponse(job_id=job_id, status="Queued")
-
-
-@app.get("/status/{job_id}", response_model=StatusResponse)
-def get_status(job_id: str) -> StatusResponse:
-    record = get_job(job_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Job not found.")
-    return StatusResponse(
-        job_id=job_id,
-        status=record.status,
-        detail=record.detail,
-        chunks_indexed=record.chunks_indexed,
-    )
-
-
-def _sse_event(payload: dict) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-@app.post("/ask")
-def ask(
-    body: AskRequest,
-    stream: bool = Query(default=True, description="Stream tokens via SSE"),
-):
-    if stream:
-        def event_generator():
-            try:
-                yield _sse_event({"type": "start", "question": body.question})
-                for token in stream_answer_question(body.question):
-                    yield _sse_event({"type": "token", "content": token})
-                yield _sse_event({"type": "done", "question": body.question})
-            except Exception as exc:
-                logger.exception("Ask stream failed")
-                yield _sse_event({"type": "error", "detail": str(exc)})
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    try:
-        answer = answer_question(body.question)
-    except Exception as exc:
-        logger.exception("Ask pipeline failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return AskResponse(question=body.question, answer=answer)

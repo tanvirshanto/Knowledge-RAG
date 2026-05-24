@@ -19,19 +19,24 @@ RUN apt-get update \
 
 COPY requirements.txt .
 
-# CPU-only PyTorch first (avoids CUDA wheels and version skew with transformers)
 RUN pip install --upgrade pip \
     && pip install "torch>=2.6.0" --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY main.py .
+COPY seed.py .
 COPY app ./app
+COPY api ./api
+COPY auth ./auth
+COPY middleware ./middleware
+COPY repositories ./repositories
+COPY services ./services
+COPY workers ./workers
+COPY schemas ./schemas
+COPY utils ./utils
 
 RUN mkdir -p tmp_uploads
 
 EXPOSE 8000
 
-
-
-# Use 1 worker: job status is in-memory (see README)
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
