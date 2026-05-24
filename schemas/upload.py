@@ -15,6 +15,7 @@ class UploadJobResponse(BaseModel):
     created_at: str
     total_pages: Optional[int] = None
     total_chunks: Optional[int] = None
+    storage_path: Optional[str] = None
 
 
 class UploadBulkResponse(BaseModel):

@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
+import uuid
+from repositories.base import get_supabase
+
 @router.post("/upload-pdf", response_model=UploadBulkResponse, status_code=status.HTTP_201_CREATED)
 async def upload_pdf(
     files: List[UploadFile] = File(..., description="PDF files to upload"),
@@ -21,7 +24,6 @@ async def upload_pdf(
 ):
     settings = get_settings()
     service = UploadService()
-    ensure_upload_dir(settings.temp_upload_dir)
 
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
@@ -47,12 +49,29 @@ async def upload_pdf(
                 detail=f"File '{file.filename}' exceeds maximum size of {settings.max_upload_size_mb}MB",
             )
 
+        job_id = uuid.uuid4().hex
+        storage_path = f"uploads/{job_id}.pdf"
+
+        try:
+            get_supabase().storage.from_("mediRag").upload(
+                path=storage_path,
+                file=content,
+                file_options={"content-type": "application/pdf", "upsert": "true"}
+            )
+        except Exception as exc:
+            logger.error("Failed to upload file to Supabase storage: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Could not upload file to storage: {exc}"
+            )
+
         job = service.create_upload_job(
             original_filename=file.filename,
             uploaded_by=current_user["sub"],
+            job_id=job_id,
+            storage_path=storage_path,
         )
 
-        save_upload(content, job.id, settings.temp_upload_dir)
         created_jobs.append(job)
         logger.info(
             "Created upload job %s for '%s' by %s",

@@ -12,15 +12,25 @@ class UploadService:
     def __init__(self, upload_repo: UploadRepository | None = None):
         self.upload_repo = upload_repo or UploadRepository()
 
-    def create_upload_job(self, original_filename: str, uploaded_by: str) -> UploadJobResponse:
-        job_id = uuid.uuid4().hex
+    def create_upload_job(
+        self,
+        original_filename: str,
+        uploaded_by: str,
+        job_id: Optional[str] = None,
+        storage_path: Optional[str] = None,
+    ) -> UploadJobResponse:
+        if not job_id:
+            job_id = uuid.uuid4().hex
         filename = f"{job_id}.pdf"
+        if not storage_path:
+            storage_path = f"uploads/{job_id}.pdf"
         record = self.upload_repo.create(
             job_id=job_id,
             filename=filename,
             original_filename=original_filename,
             uploaded_by=uploaded_by,
             status="QUEUED",
+            storage_path=storage_path,
         )
         return self._to_response(record)
 
@@ -83,4 +93,5 @@ class UploadService:
             created_at=record.get("created_at", ""),
             total_pages=record.get("total_pages"),
             total_chunks=record.get("total_chunks"),
+            storage_path=record.get("storage_path"),
         )

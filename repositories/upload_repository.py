@@ -18,6 +18,7 @@ class UploadRepository(BaseRepository):
         original_filename: str,
         uploaded_by: str,
         status: str = "QUEUED",
+        storage_path: Optional[str] = None,
     ) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         result = self.table.insert({
@@ -27,6 +28,7 @@ class UploadRepository(BaseRepository):
             "uploaded_by": uploaded_by,
             "status": status,
             "created_at": now,
+            "storage_path": storage_path,
         }).execute()
         return self._execute_single(result)
 
