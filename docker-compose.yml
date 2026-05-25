@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    image: medical-rag
     container_name: medical-rag-api
     ports:
       - "8000:8000"
@@ -8,25 +9,25 @@ services:
       - .env
     environment:
       TEMP_UPLOAD_DIR: /app/tmp_uploads
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE}
+      CHUNK_SIZE: ${CHUNK_SIZE}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
       JWT_SECRET: ${JWT_SECRET}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
-    volumes:
-      - rag_uploads:/app/tmp_uploads
+      SEED_ADMIN_ROLE: ${SEED_ADMIN_ROLE}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB}
     restart: unless-stopped
-
-  frontend:
-    build:
-      context: ../Frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
-    container_name: medical-rag-ui
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-
-volumes:
-  rag_uploads:

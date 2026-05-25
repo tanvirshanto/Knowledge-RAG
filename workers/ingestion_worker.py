@@ -19,7 +19,9 @@ class IngestionWorker:
         self._processing = False
 
     async def start(self) -> None:
+        logger.info("IngestionWorker starting...")
         if self._task is not None:
+            logger.info("IngestionWorker already running")
             return
         self._shutdown = False
         self._task = asyncio.create_task(self._process_loop())
@@ -49,6 +51,7 @@ class IngestionWorker:
                     continue
 
                 job = repo.get_next_queued()
+                logger.info("Worker picked up job %s", job)
                 if not job:
                     continue
 

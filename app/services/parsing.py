@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from docling.datamodel.base_models import ConversionStatus, InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 
 from app.config import Settings
@@ -16,6 +16,7 @@ def _get_converter() -> DocumentConverter:
             do_ocr=True,
             do_table_structure=True,
         )
+        pipeline_options.ocr_options = RapidOcrOptions()
         _converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
