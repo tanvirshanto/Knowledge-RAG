@@ -3,10 +3,13 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from app.config import get_settings
 from app.pipelines.ingestion import run_ingestion_pipeline
 from repositories.upload_repository import UploadRepository
 from repositories.base import get_supabase
+from utils.retry import retry_sync
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ class IngestionWorker:
         upload_dir = Path(settings.temp_upload_dir)
 
         while not self._shutdown:
+            job = None
             try:
                 await asyncio.sleep(self.interval)
                 if self._processing:
@@ -60,6 +64,19 @@ class IngestionWorker:
                     await self._process_job(job, repo, upload_dir)
                 finally:
                     self._processing = False
+            except httpx.RequestError as exc:
+                logger.warning(
+                    "Network/connection error in worker process loop (retrying in %ss): %s",
+                    self.interval,
+                    exc,
+                )
+                if job:
+                    try:
+                        repo.update_status(job["id"], "QUEUED")
+                        logger.info("Reset job %s status back to QUEUED due to network error", job["id"])
+                    except Exception as reset_exc:
+                        logger.debug("Failed to reset job %s status to QUEUED: %s", job["id"], reset_exc)
+                await asyncio.sleep(self.interval)
             except Exception as exc:
                 logger.exception("Error in worker process loop")
                 await asyncio.sleep(self.interval)
@@ -80,7 +97,12 @@ class IngestionWorker:
         try:
             logger.info("Downloading PDF from Supabase storage path: %s", storage_path)
             try:
-                content_bytes = get_supabase().storage.from_("mediRag").download(storage_path)
+                content_bytes = retry_sync(
+                    lambda: get_supabase().storage.from_("mediRag").download(storage_path),
+                    "supabase.storage.download",
+                )
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                raise e
             except Exception as e:
                 raise FileNotFoundError(
                     f"PDF file for job {job_id} could not be downloaded from storage path '{storage_path}': {e}"
@@ -106,6 +128,8 @@ class IngestionWorker:
                 )
             logger.info("Job %s completed successfully", job_id)
 
+        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+            raise exc
         except Exception as exc:
             logger.exception("Job %s failed", job_id)
             repo.update_status(

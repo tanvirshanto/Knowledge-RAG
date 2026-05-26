@@ -9,7 +9,7 @@ from app.config import Settings
 _converter: DocumentConverter | None = None
 
 
-def _get_converter() -> DocumentConverter:
+def get_converter() -> DocumentConverter:
     global _converter
     if _converter is None:
         pipeline_options = PdfPipelineOptions(
@@ -28,7 +28,7 @@ def _get_converter() -> DocumentConverter:
 def parse_pdf_to_markdown(pdf_path: Path, settings: Settings) -> tuple[str, any]:
     """Layout-aware PDF parsing with OCR and table preservation via Docling."""
     _ = settings  # reserved for future parse options
-    converter = _get_converter()
+    converter = get_converter()
     result = converter.convert(str(pdf_path))
 
     if result.status != ConversionStatus.SUCCESS:

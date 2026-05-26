@@ -1,13 +1,16 @@
 import logging
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 from supabase import Client, create_client
 
 from app.config import get_settings
+from utils.retry import retry_sync
 
 logger = logging.getLogger(__name__)
 
 _supabase_client: Optional[Client] = None
+
+T = TypeVar("T")
 
 
 def get_supabase() -> Client:
@@ -40,3 +43,12 @@ class BaseRepository:
     def _execute_single(self, result) -> Optional[dict]:
         data = self._execute(result)
         return data[0] if data else None
+
+    def _execute_with_retry(
+        self,
+        query_callable: Callable[[], T],
+        *,
+        single: bool = False,
+    ):
+        result = retry_sync(query_callable, f"supabase.{self.table_name}")
+        return self._execute_single(result) if single else self._execute(result)

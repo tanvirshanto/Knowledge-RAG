@@ -16,6 +16,7 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 import uuid
 from repositories.base import get_supabase
+from utils.retry import retry_sync
 
 @router.post("/upload-pdf", response_model=UploadBulkResponse, status_code=status.HTTP_201_CREATED)
 async def upload_pdf(
@@ -53,10 +54,13 @@ async def upload_pdf(
         storage_path = f"uploads/{job_id}.pdf"
 
         try:
-            get_supabase().storage.from_("mediRag").upload(
-                path=storage_path,
-                file=content,
-                file_options={"content-type": "application/pdf", "upsert": "true"}
+            retry_sync(
+                lambda: get_supabase().storage.from_("mediRag").upload(
+                    path=storage_path,
+                    file=content,
+                    file_options={"content-type": "application/pdf", "upsert": "true"}
+                ),
+                "supabase.storage.upload",
             )
         except Exception as exc:
             logger.error("Failed to upload file to Supabase storage: %s", exc)

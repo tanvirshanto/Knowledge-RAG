@@ -1,10 +1,13 @@
-from app.pipelines.ingestion import logger
+import logging
 from collections.abc import Iterator
 
 from google import genai
 from google.genai import types
 
 from app.config import Settings
+from utils.retry import retry_sync
+
+logger = logging.getLogger(__name__)
 
 MEDICAL_RAG_SYSTEM = """
 You are a medical information assistant.
@@ -88,18 +91,25 @@ class GeminiLLM:
             yield NOT_FOUND_ANSWER
             return
         logger.info("LLM prompt built successfully.")
-        stream = self._client.models.generate_content_stream(
-            model=self._settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=MEDICAL_RAG_SYSTEM,
-                temperature=self._settings.llm_temperature,
+        stream = retry_sync(
+            lambda: self._client.models.generate_content_stream(
+                model=self._settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=MEDICAL_RAG_SYSTEM,
+                    temperature=self._settings.llm_temperature,
+                ),
             ),
+            "gemini.generate_content_stream",
         )
         logger.info("LLM response stream created.")
-        for chunk in stream:
-            if chunk.text:
-                yield chunk.text
+        try:
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as exc:
+            logger.exception("Gemini stream interrupted mid-response")
+            raise RuntimeError(f"LLM stream failed mid-response: {exc}") from exc
 
     def answer(self, question: str, contexts: list[dict]) -> str:
         parts = list(self.stream_answer(question, contexts))

@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # Upload limits
     max_upload_size_mb: int = 50
 
+    # Retry
+    max_retries: int = 3
+    retry_base_delay_seconds: float = 1.0
+    retry_backoff_multiplier: float = 2.0
+    retry_max_delay_seconds: float = 30.0
+
 
 @lru_cache
 def get_settings() -> Settings:

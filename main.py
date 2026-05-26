@@ -34,6 +34,11 @@ async def lifespan(app: FastAPI):
     # get_embedding_service(settings)
     logger.info("LocalEmbeddingService pre-warmed successfully.")
 
+    from app.services.parsing import get_converter
+    logger.info("Pre-warming DocumentConverter...")
+    get_converter()
+    logger.info("DocumentConverter pre-warmed successfully.")
+
     from app.services.vector_store import get_vector_store
     logger.info("Ensuring Qdrant collection '%s' exists...", settings.qdrant_collection_name)
     get_vector_store(settings).ensure_collection()

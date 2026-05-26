@@ -7,6 +7,7 @@ from qdrant_client.http import models as qmodels
 
 from app.config import Settings
 from app.services.chunking import TextChunk
+from utils.retry import retry_sync
 
 
 class QdrantVectorStore:
@@ -26,15 +27,21 @@ class QdrantVectorStore:
         if vector_size is None:
             vector_size = self._settings.embedding_dimension
 
-        collections = self._client.get_collections().collections
-        names = {c.name for c in collections}
+        collections_response = retry_sync(
+            lambda: self._client.get_collections(),
+            "qdrant.get_collections",
+        )
+        names = {c.name for c in collections_response.collections}
         if self._collection not in names:
-            self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=qmodels.VectorParams(
-                    size=vector_size,
-                    distance=qmodels.Distance.COSINE,
+            retry_sync(
+                lambda: self._client.create_collection(
+                    collection_name=self._collection,
+                    vectors_config=qmodels.VectorParams(
+                        size=vector_size,
+                        distance=qmodels.Distance.COSINE,
+                    ),
                 ),
+                "qdrant.create_collection",
             )
         self._ensured = True
 
@@ -71,9 +78,13 @@ class QdrantVectorStore:
 
         batch_size = 64
         for i in range(0, len(points), batch_size):
-            self._client.upsert(
-                collection_name=self._collection,
-                points=points[i : i + batch_size],
+            batch = points[i : i + batch_size]
+            retry_sync(
+                lambda b=batch: self._client.upsert(
+                    collection_name=self._collection,
+                    points=b,
+                ),
+                f"qdrant.upsert(batch_{i // batch_size})",
             )
         return len(points)
 
@@ -83,11 +94,14 @@ class QdrantVectorStore:
         *,
         top_k: int,
     ) -> List[dict]:
-        response = self._client.query_points(
-            collection_name=self._collection,
-            query=query_vector,
-            limit=top_k,
-            with_payload=True,
+        response = retry_sync(
+            lambda: self._client.query_points(
+                collection_name=self._collection,
+                query=query_vector,
+                limit=top_k,
+                with_payload=True,
+            ),
+            "qdrant.query_points",
         )
         hits = response.points
         results = []

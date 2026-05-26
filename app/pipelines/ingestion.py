@@ -9,8 +9,16 @@ from app.services.embeddings import get_embedding_service
 from app.services.parsing import parse_pdf_to_markdown
 from app.services.vector_store import get_vector_store
 from app.state import update_job
+from services.system_log_service import SystemLogService
 
 logger = logging.getLogger(__name__)
+
+
+def _log_pipeline_error(level: str, message: str, exception: Exception) -> None:
+    try:
+        SystemLogService().log_error(level=level, message=message, exception=exception)
+    except Exception:
+        logger.warning("Failed to persist pipeline error to system_logs", exc_info=True)
 
 def run_ingestion_pipeline(job_id: str, pdf_path: Path, filename: str = "document.pdf") -> None:
     settings = get_settings()
@@ -19,6 +27,8 @@ def run_ingestion_pipeline(job_id: str, pdf_path: Path, filename: str = "documen
         logger.info("Starting ingestion pipeline for job %s", job_id)
         update_job(job_id, status=JobStatus.PARSING)
         markdown, doc = parse_pdf_to_markdown(pdf_path, settings)
+        logger.info("PDF parsed successfully.")
+        logger.info("Markdown: %s", markdown)
 
         update_job(job_id, status=JobStatus.CHUNKING)
         logger.info("Chunking markdown...")
@@ -53,6 +63,11 @@ def run_ingestion_pipeline(job_id: str, pdf_path: Path, filename: str = "documen
     except Exception as exc:
         logger.exception("Ingestion failed for job %s", job_id)
         update_job(job_id, status=JobStatus.FAILED, detail=str(exc))
+        _log_pipeline_error(
+            "ERROR",
+            f"Ingestion pipeline failed for job {job_id} ({filename}): {exc}",
+            exc,
+        )
         raise
     finally:
         _safe_delete(pdf_path)
