@@ -10,12 +10,41 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-DEFAULT_RETRYABLE: tuple[type[BaseException], ...] = (
+_retryable_list: list[type[BaseException]] = [
     httpx.RequestError,
     ConnectionError,
     TimeoutError,
     OSError,
-)
+]
+
+# Dynamically add Qdrant exceptions if available
+try:
+    from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+    _retryable_list.extend([ResponseHandlingException, UnexpectedResponse])
+except ImportError:
+    pass
+
+# Dynamically add Google GenAI exceptions if available
+try:
+    from google.genai.errors import ServerError
+    _retryable_list.append(ServerError)
+except ImportError:
+    pass
+
+DEFAULT_RETRYABLE = tuple(_retryable_list)
+
+
+def _is_non_retryable_unexpected_response(exc: BaseException) -> bool:
+    try:
+        from qdrant_client.http.exceptions import UnexpectedResponse
+        if isinstance(exc, UnexpectedResponse):
+            # Only retry on transient/timeout statuses: 408 (Timeout), 500, 502, 503, 504.
+            # Do NOT retry client/validation errors like 400, 401, 403, 404, 409 etc.
+            if exc.status_code not in {408, 500, 502, 503, 504}:
+                return True
+    except ImportError:
+        pass
+    return False
 
 
 def retry_sync(
@@ -38,6 +67,16 @@ def retry_sync(
         try:
             return operation()
         except retryable_exceptions as exc:
+            # Prevent retrying on non-retryable Qdrant HTTP status codes
+            if _is_non_retryable_unexpected_response(exc):
+                logger.error(
+                    "Non-retryable UnexpectedResponse for '%s' — %s: %s",
+                    operation_name,
+                    type(exc).__name__,
+                    exc,
+                )
+                raise exc
+
             last_exception = exc
             if attempt < max_retries:
                 delay = min(base_delay * (multiplier ** attempt), max_delay)

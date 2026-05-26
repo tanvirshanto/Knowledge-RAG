@@ -30,11 +30,16 @@ class SystemLogService:
         )
         return self._to_response(record)
 
+    def list_logs(self, limit: int = 100, offset: int = 0) -> list[SystemLogResponse]:
+        records = self.log_repo.list_all(limit=limit, offset=offset)
+        return [self._to_response(record) for record in records]
+
     def _to_response(self, record: dict) -> SystemLogResponse:
         return SystemLogResponse(
-            id=record.get("id", ""),
+            id=str(record.get("id", "")),
             level=record.get("level", ""),
             message=record.get("message", ""),
             traceback=record.get("traceback"),
             created_at=record.get("created_at", ""),
         )
+

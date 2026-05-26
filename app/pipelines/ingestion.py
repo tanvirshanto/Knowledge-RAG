@@ -28,7 +28,6 @@ def run_ingestion_pipeline(job_id: str, pdf_path: Path, filename: str = "documen
         update_job(job_id, status=JobStatus.PARSING)
         markdown, doc = parse_pdf_to_markdown(pdf_path, settings)
         logger.info("PDF parsed successfully.")
-        logger.info("Markdown: %s", markdown)
 
         update_job(job_id, status=JobStatus.CHUNKING)
         logger.info("Chunking markdown...")

@@ -23,6 +23,8 @@ RUN pip install --upgrade pip \
     && pip install "torch>=2.6.0" --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
+RUN python -c "import os, urllib.request; d='/usr/local/lib/python3.11/site-packages/rapidocr/models'; os.makedirs(d, exist_ok=True); [urllib.request.urlretrieve(u, os.path.join(d, u.split('/')[-1])) for u in ['https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/det/ch_PP-OCRv4_det_mobile.onnx', 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx', 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_mobile.onnx']]; print('Models cached successfully!')"
+
 COPY main.py .
 COPY seed.py .
 COPY app ./app
