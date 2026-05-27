@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     retry_backoff_multiplier: float = 2.0
     retry_max_delay_seconds: float = 30.0
 
+    # CORS
+    allowed_origins: str
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:
