@@ -5,18 +5,18 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
-    QUEUED = "Queued"
-    PARSING = "Parsing..."
-    CHUNKING = "Chunking..."
-    EMBEDDING = "Embedding..."
-    INDEXING = "Indexing..."
-    COMPLETED = "Completed"
-    FAILED = "Failed"
+    QUEUED = "QUEUED"
+    PARSING = "PARSING"
+    CHUNKING = "CHUNKING"
+    EMBEDDING = "EMBEDDING"
+    INDEXING = "INDEXING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 
 class UploadResponse(BaseModel):
     job_id: str
-    status: str = "Queued"
+    status: str = "QUEUED"
 
 
 class StatusResponse(BaseModel):

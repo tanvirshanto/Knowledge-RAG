@@ -50,7 +50,10 @@ class UploadRepository(BaseRepository):
         def _query():
             query = self.table.select("*", count="exact")
             if status_filter:
-                query = query.eq("status", status_filter)
+                if status_filter == "RUNNING":
+                    query = query.not_.in_("status", ["FAILED", "COMPLETED", "QUEUED"])
+                else:
+                    query = query.eq("status", status_filter)
             query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
             return query.execute()
 
@@ -85,7 +88,7 @@ class UploadRepository(BaseRepository):
         return self._execute_with_retry(
             lambda: (
                 self.table.select("*")
-                .eq("status", "RUNNING")
+                .not_.in_("status", ["FAILED", "COMPLETED", "QUEUED"])
                 .limit(1)
                 .execute()
             ),
