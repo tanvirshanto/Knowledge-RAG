@@ -45,8 +45,9 @@ class UploadService:
         status_filter: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        search: Optional[str] = None,
     ) -> UploadListResponse:
-        rows, total = self.upload_repo.list_all(status_filter, limit, offset)
+        rows, total = self.upload_repo.list_all(status_filter, limit, offset, search)
         return UploadListResponse(
             jobs=[self._to_response(r) for r in rows],
             total=total,

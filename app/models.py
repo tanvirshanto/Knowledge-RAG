@@ -28,6 +28,7 @@ class StatusResponse(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
+    conversation_id: Optional[str] = None
 
 
 class AskResponse(BaseModel):

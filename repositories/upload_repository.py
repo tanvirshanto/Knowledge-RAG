@@ -46,6 +46,7 @@ class UploadRepository(BaseRepository):
         status_filter: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        search: Optional[str] = None,
     ) -> tuple[list[dict], int]:
         def _query():
             query = self.table.select("*", count="exact")
@@ -54,6 +55,8 @@ class UploadRepository(BaseRepository):
                     query = query.not_.in_("status", ["FAILED", "COMPLETED", "QUEUED"])
                 else:
                     query = query.eq("status", status_filter)
+            if search:
+                query = query.ilike("original_filename", f"%{search}%")
             query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
             return query.execute()
 

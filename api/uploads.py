@@ -90,9 +90,10 @@ def list_uploads(
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
 ):
     service = UploadService()
-    return service.list_jobs(status_filter=status_filter, limit=limit, offset=offset)
+    return service.list_jobs(status_filter=status_filter, limit=limit, offset=offset, search=search)
 
 
 @router.get("/running", response_model=UploadJobResponse | None)

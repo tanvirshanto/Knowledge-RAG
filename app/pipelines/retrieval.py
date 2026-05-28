@@ -98,12 +98,12 @@ def retrieve_contexts(question: str) -> list[dict]:
         raise
 
 
-def stream_answer_question(question: str) -> Iterator[str]:
+def stream_answer_question(question: str, history: list[dict] | None = None) -> Iterator[str]:
     try:
         settings = get_settings()
         contexts = retrieve_contexts(question)
         llm = GeminiLLM(settings)
-        yield from llm.stream_answer(question, contexts)
+        yield from llm.stream_answer(question, contexts, history)
     except Exception as exc:
         logger.exception("Stream-answer failed for question: %s", question)
         _log_pipeline_error(
@@ -114,11 +114,11 @@ def stream_answer_question(question: str) -> Iterator[str]:
         raise
 
 
-def answer_question(question: str) -> str:
+def answer_question(question: str, history: list[dict] | None = None) -> str:
     try:
         settings = get_settings()
         contexts = retrieve_contexts(question)
-        return GeminiLLM(settings).answer(question, contexts)
+        return GeminiLLM(settings).answer(question, contexts, history)
     except Exception as exc:
         logger.exception("Answer pipeline failed for question: %s", question)
         _log_pipeline_error(

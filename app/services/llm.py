@@ -84,17 +84,33 @@ class GeminiLLM:
             return None
         return build_medical_prompt(question, contexts)
 
-    def stream_answer(self, question: str, contexts: list[dict]) -> Iterator[str]:
+    def _build_contents(self, question: str, contexts: list[dict], history: list[dict] | None = None) -> str | list | None:
+        """Build the contents parameter for Gemini. Returns None if no context."""
         prompt = self._prompt(question, contexts)
         if prompt is None:
+            return None
+
+        if not history:
+            return prompt
+
+        contents = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        contents.append({"role": "user", "parts": [{"text": prompt}]})
+        return contents
+
+    def stream_answer(self, question: str, contexts: list[dict], history: list[dict] | None = None) -> Iterator[str]:
+        contents = self._build_contents(question, contexts, history)
+        if contents is None:
             logger.info("No contexts retrieved for question: %s", question)
             yield NOT_FOUND_ANSWER
             return
-        logger.info("LLM prompt built successfully.")
+        logger.info("LLM prompt built successfully (history turns: %d).", len(history) if history else 0)
         stream = retry_sync(
             lambda: self._client.models.generate_content_stream(
                 model=self._settings.gemini_model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=MEDICAL_RAG_SYSTEM,
                     temperature=self._settings.llm_temperature,
@@ -111,6 +127,6 @@ class GeminiLLM:
             logger.exception("Gemini stream interrupted mid-response")
             raise RuntimeError(f"LLM stream failed mid-response: {exc}") from exc
 
-    def answer(self, question: str, contexts: list[dict]) -> str:
-        parts = list(self.stream_answer(question, contexts))
+    def answer(self, question: str, contexts: list[dict], history: list[dict] | None = None) -> str:
+        parts = list(self.stream_answer(question, contexts, history))
         return "".join(parts).strip() if parts else NOT_FOUND_ANSWER

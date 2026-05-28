@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # Upload limits
     max_upload_size_mb: int = 50
 
+    # Chat history
+    chat_history_max_turns: int = 10
+
     # Retry
     max_retries: int = 3
     retry_base_delay_seconds: float = 1.0

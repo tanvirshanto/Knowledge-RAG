@@ -2,7 +2,7 @@
 
 ## Overview
 
-Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses them with Docling (OCR + table extraction), chunks with context-injected breadcrumb headers, embeds via local BGE-M3 (1024-dim), indexes into Qdrant Cloud, and answers questions via Google Gemini with strict context-only prompting. JWT auth with RBAC (`maintainer`/`user`), Supabase-backed state, and an in-process background ingestion worker.
+Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses them with Docling (OCR + table extraction), chunks with context-injected breadcrumb headers, embeds via local BGE-M3 (1024-dim), indexes into Qdrant Cloud, and answers questions via Google Gemini with strict context-only prompting. Supports multi-turn chat history with per-user conversations stored in Supabase. JWT auth with RBAC (`maintainer`/`user`), Supabase-backed state, and an in-process background ingestion worker.
 
 **Tech stack:** Python 3.10+, FastAPI, Supabase, Qdrant Cloud, Google Gemini, sentence-transformers (BGE-M3), Docling, langchain_text_splitters, JWT (python-jose), bcrypt, SSE streaming.
 
@@ -12,11 +12,12 @@ Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses
 ├── main.py                  # FastAPI app entrypoint, lifespan (worker start/stop, embedding pre-warm, Qdrant collection ensure)
 ├── seed.py                  # Admin user seed (disabled in lifespan — runs via cli)
 ├── api/                     # Route handlers
-│   ├── router.py            # Aggregates all routers (/auth, /ask, /users, /uploads)
+│   ├── router.py            # Aggregates all routers (/auth, /ask, /users, /uploads, /conversations)
 │   ├── auth.py              # POST /auth/login
-│   ├── ask.py               # POST /ask (SSE streaming default)
+│   ├── ask.py               # POST /ask (SSE streaming, auto-creates conversation, saves messages)
 │   ├── users.py             # CRUD /users (maintainer-only)
-│   └── uploads.py           # POST /uploads/upload-pdf, GET /uploads/*
+│   ├── uploads.py           # POST /uploads/upload-pdf, GET /uploads/*
+│   └── conversations.py     # CRUD /conversations (list, get with messages, rename, delete)
 ├── auth/                    # Authentication
 │   ├── security.py          # bcrypt hashing
 │   ├── jwt.py               # Token create/decode
@@ -27,14 +28,18 @@ Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses
 ├── repositories/            # Supabase data access
 │   ├── base.py              # Client singleton + BaseRepository
 │   ├── user_repository.py   # users table
-│   └── upload_repository.py # upload_jobs table
+│   ├── upload_repository.py # upload_jobs table
+│   ├── conversation_repository.py # conversations table
+│   └── message_repository.py # messages table
 ├── services/                # Business logic
 │   ├── user_service.py      # User CRUD + auth
-│   └── upload_service.py    # Upload orchestration
+│   ├── upload_service.py    # Upload orchestration
+│   └── conversation_service.py # Chat history management
 ├── schemas/                 # Pydantic request/response models
 │   ├── auth.py
 │   ├── user.py
-│   └── upload.py
+│   ├── upload.py
+│   └── conversation.py      # Conversation + message models
 ├── workers/
 │   └── ingestion_worker.py  # Sequential ingestion loop (poll Supabase)
 ├── app/                     # Core RAG pipeline
@@ -66,6 +71,8 @@ Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses
 
 6. **Retrieval has figure-aware boosting** — If the question mentions figures/pages or diagnosis keywords, the pipeline performs a secondary search for `"Legend for Figure {X}"` and boosts context scores for chunks containing "answer guide" or "legends for introductory figures" by +0.5, then re-sorts.
 
+7. **Multi-turn chat history** — `POST /ask` accepts an optional `conversation_id`. If omitted, a new conversation is auto-created (title = first 50 chars of question). Previous messages (up to `CHAT_HISTORY_MAX_TURNS * 2`) are loaded and sent to Gemini as multi-turn `contents` with alternating `user`/`model` roles. The current question's RAG context is always the final user message. Both user and assistant messages are saved after each interaction. The `conversation_id` is emitted in SSE `start` and `done` events so the frontend can track it.
+
 ## Data Flow — Full Pipeline
 
 ```
@@ -88,11 +95,33 @@ IngestionWorker (background, polls every WORKER_POLL_INTERVAL_SECONDS)
   → Delete local PDF temp
 
 POST /ask (authenticated, SSE streaming default)
+  → Resolve user_id from JWT username via UserRepository
+  → If conversation_id provided: verify ownership, load last CHAT_HISTORY_MAX_TURNS*2 messages
+  → If no conversation_id: auto-create conversation (title = question[:50])
   → BGE-M3 embed query
   → Qdrant search (top_k=RETRIEVAL_TOP_K, default 20, cosine)
   → Figure-aware secondary search + legend boost if figure/diagnosis mention detected
-  → Build Gemini prompt with strict medical context-only prompt
-  → Stream response via SSE
+  → Build Gemini prompt: history messages + RAG context + current question
+  → Stream response via SSE (emits conversation_id in start/done events)
+  → Save user message + assistant response to messages table
+
+GET /conversations (authenticated)
+  → List user's conversations ordered by updated_at DESC
+
+POST /conversations (authenticated)
+  → Create conversation with optional title
+
+GET /conversations/{id} (authenticated)
+  → Verify ownership
+  → Return conversation with all messages (ordered by created_at ASC)
+
+PATCH /conversations/{id} (authenticated)
+  → Verify ownership
+  → Update title
+
+DELETE /conversations/{id} (authenticated)
+  → Verify ownership
+  → Delete conversation (cascades to messages via FK)
 ```
 
 ## Supabase Schema
@@ -132,6 +161,24 @@ POST /ask (authenticated, SSE streaming default)
 | traceback | TEXT | |
 | created_at | TIMESTAMPTZ | DEFAULT NOW() |
 
+### `conversations` table
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID | PK, gen_random_uuid() |
+| user_id | UUID | FK → users.id, NOT NULL |
+| title | TEXT | NOT NULL (auto-generated from first question or user-provided) |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+| updated_at | TIMESTAMPTZ | DEFAULT NOW(), updated on new message |
+
+### `messages` table
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID | PK, gen_random_uuid() |
+| conversation_id | UUID | FK → conversations.id ON DELETE CASCADE, NOT NULL |
+| role | TEXT | NOT NULL, CHECK IN ('user', 'assistant') |
+| content | TEXT | NOT NULL |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+
 ## Status Flow for Upload Jobs
 
 ```
@@ -165,13 +212,14 @@ Note: `run_ingestion_pipeline` uses statuses from `app.models.JobStatus` enum (e
 | SEED_ADMIN_USERNAME | No | admin |
 | SEED_ADMIN_PASSWORD | No | Admin@1234 |
 | TEMP_UPLOAD_DIR | No | tmp_uploads |
+| CHAT_HISTORY_MAX_TURNS | No | 10 |
 
 ## Roles & Permissions
 
 | Role | Permissions |
 |------|-------------|
-| `maintainer` | Upload PDFs, manage uploads, manage users |
-| `user` | Ask questions only |
+| `maintainer` | Upload PDFs, manage uploads, manage users, chat history |
+| `user` | Ask questions, manage own chat history |
 
 Authorization pattern: `Depends(require_maintainer)` on routes, or `Depends(get_current_user)` for any authenticated user.
 
@@ -216,6 +264,9 @@ The LLM is instructed to:
 - Admin seed in `seed.py` is called from the root module name `"seed"`, not `"seed.seed"`.
 - The `app/state.py` module is a thin wrapper around `UploadRepository` — prefer using the repository/service layers directly for new code.
 - CORS is configured for `localhost:3000` and `127.0.0.1:3000` only.
+- **Chat history**: Conversations are scoped to users via `user_id` FK. All `/conversations` endpoints enforce ownership checks. Deleting a conversation cascades to all messages.
+- **Multi-turn LLM**: Gemini API uses `"model"` role (not `"assistant"`) for conversation history. The `llm.py` service maps `"assistant"` → `"model"` when building multi-turn `contents`.
+- **History limit**: `CHAT_HISTORY_MAX_TURNS` controls how many message pairs are sent to Gemini (default 10 turns = 20 messages). Adjust via env var without code changes.
 
 ## Docker
 
