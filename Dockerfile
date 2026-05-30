@@ -22,18 +22,13 @@ RUN apt-get update \
 
 COPY requirements.txt .
 
-RUN pip install --upgrade pip \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
     && pip install "torch>=2.6.0" --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Pre-download RapidOCR models (only ~15MB, baked into image)
 RUN python -c "import os, urllib.request; d='/usr/local/lib/python3.11/site-packages/rapidocr/models'; os.makedirs(d, exist_ok=True); [urllib.request.urlretrieve(u, os.path.join(d, u.split('/')[-1])) for u in ['https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/det/ch_PP-OCRv4_det_mobile.onnx', 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx', 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.8.0/onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_mobile.onnx']]; print('Models cached successfully!')"
-
-# Download and pre-cache BGE-M3 and Docling models
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')" \
-    && python -c "from docling.utils.model_downloader import download_models; from pathlib import Path; download_models(output_dir=Path('/app/.cache/docling/models'))" \
-    && chmod -R a+rx /app/.cache
-
-ENV HF_HUB_OFFLINE=1
 
 COPY main.py .
 COPY seed.py .
@@ -46,6 +41,7 @@ COPY services ./services
 COPY workers ./workers
 COPY schemas ./schemas
 COPY utils ./utils
+COPY vertex_rag ./vertex_rag
 
 RUN mkdir -p tmp_uploads
 

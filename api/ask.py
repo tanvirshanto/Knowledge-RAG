@@ -20,6 +20,37 @@ def _sse_event(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _get_vertex_answer(question: str) -> str:
+    """Get answer using Vertex AI RAG engine."""
+    from vertex_rag.config import VertexRAGConfig
+    from vertex_rag.retrieval import RetrievalEngine
+    logger.info("Getting answer using Vertex AI RAG engine")
+    settings = get_settings()
+    config = VertexRAGConfig.from_env(
+        corpus_id=settings.vertex_rag_corpus_id,
+        bucket_name=settings.google_cloud_bucket,
+    )
+    engine = RetrievalEngine.from_config(config)
+    result = engine.ask(question)
+    return result.answer
+
+
+def _get_vertex_answer_stream(question: str):
+    """Get streaming answer using Vertex AI RAG engine (yields full response)."""
+    from vertex_rag.config import VertexRAGConfig
+    from vertex_rag.retrieval import RetrievalEngine
+
+    settings = get_settings()
+    config = VertexRAGConfig.from_env(
+        corpus_id=settings.vertex_rag_corpus_id,
+        bucket_name=settings.google_cloud_bucket,
+    )
+    engine = RetrievalEngine.from_config(config)
+    result = engine.ask(question)
+    # Vertex API doesn't support token streaming, yield full response
+    yield result.answer
+
+
 @router.post("")
 def ask(
     body: AskRequest,
@@ -53,6 +84,15 @@ def ask(
         conversation_id = conversation.id
         history = []
     
+    # Select answer function based on RAG engine type
+    logger.info(f"RAG engine type: {settings.rag_engine_type}")
+    if settings.is_vertex_engine:
+        answer_fn = _get_vertex_answer
+        stream_fn = _get_vertex_answer_stream
+    else:
+        answer_fn = lambda q: answer_question(q, history)
+        stream_fn = lambda q: stream_answer_question(q, history)
+    
     if stream:
         def event_generator():
             try:
@@ -64,7 +104,7 @@ def ask(
                 
                 # Collect full response for saving
                 full_response = []
-                for token in stream_answer_question(body.question, history):
+                for token in stream_fn(body.question):
                     full_response.append(token)
                     yield _sse_event({"type": "token", "content": token})
                 
@@ -96,7 +136,7 @@ def ask(
         )
 
     try:
-        answer = answer_question(body.question, history)
+        answer = answer_fn(body.question)
         # Save messages for non-streaming response
         conversation_service.save_messages(
             conversation_id,

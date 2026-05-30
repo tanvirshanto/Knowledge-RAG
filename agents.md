@@ -2,9 +2,9 @@
 
 ## Overview
 
-Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses them with Docling (OCR + table extraction), chunks with context-injected breadcrumb headers, embeds via local BGE-M3 (1024-dim), indexes into Qdrant Cloud, and answers questions via Google Gemini with strict context-only prompting. Supports multi-turn chat history with per-user conversations stored in Supabase. JWT auth with RBAC (`maintainer`/`user`), Supabase-backed state, and an in-process background ingestion worker.
+Production FastAPI backend for medical textbook RAG with dual-engine support: **Local** (Docling + BGE-M3 + Qdrant Cloud) or **Vertex AI** (Google Vertex AI RAG engine). The engine is selected via `RAG_ENGINE_TYPE` env var. Accepts PDF uploads, ingests via the selected engine, and answers questions via Google Gemini with strict context-only prompting (local) or Vertex AI grounded generation (vertex). Supports multi-turn chat history with per-user conversations stored in Supabase. JWT auth with RBAC (`maintainer`/`user`), Supabase-backed state, and an in-process background ingestion worker.
 
-**Tech stack:** Python 3.10+, FastAPI, Supabase, Qdrant Cloud, Google Gemini, sentence-transformers (BGE-M3), Docling, langchain_text_splitters, JWT (python-jose), bcrypt, SSE streaming.
+**Tech stack:** Python 3.10+, FastAPI, Supabase, Qdrant Cloud, Google Gemini, Google Vertex AI RAG, sentence-transformers (BGE-M3), Docling, langchain_text_splitters, JWT (python-jose), bcrypt, SSE streaming.
 
 ## Project Structure
 
@@ -41,13 +41,18 @@ Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses
 │   ├── upload.py
 │   └── conversation.py      # Conversation + message models
 ├── workers/
-│   └── ingestion_worker.py  # Sequential ingestion loop (poll Supabase)
-├── app/                     # Core RAG pipeline
-│   ├── config.py            # Pydantic Settings (all env vars)
+│   └── ingestion_worker.py  # Sequential ingestion loop (poll Supabase, routes to local or vertex engine)
+├── vertex_rag/              # Vertex AI RAG engine (alternative to local pipeline)
+│   ├── config.py            # VertexRAGConfig dataclass (GCP project, corpus, bucket)
+│   ├── ingestion.py         # IngestionEngine — uploads PDFs to GCS, triggers Vertex RAG import
+│   ├── poller.py            # StatusPoller — polls Vertex AI LRO for ingestion completion
+│   └── retrieval.py         # RetrievalEngine — AskContextsRequest for grounded answers
+├── app/                     # Core RAG pipeline (local engine)
+│   ├── config.py            # Pydantic Settings (all env vars, engine selection via is_vertex_engine)
 │   ├── state.py             # Supabase-backed job tracking wrapper
 │   ├── models.py            # JobStatus enum, AskRequest/AskResponse
 │   ├── pipelines/
-│   │   ├── ingestion.py     # run_ingestion_pipeline()
+│   │   ├── ingestion.py     # run_ingestion_pipeline() — local Docling+BGE-M3+Qdrant
 │   │   └── retrieval.py     # retrieve_contexts(), stream_answer_question(), answer_question()
 │   └── services/
 │       ├── parsing.py       # Docling PDF → Markdown (singleton converter)
@@ -73,6 +78,8 @@ Production FastAPI backend for medical textbook RAG. Accepts PDF uploads, parses
 
 7. **Multi-turn chat history** — `POST /ask` accepts an optional `conversation_id`. If omitted, a new conversation is auto-created (title = first 50 chars of question). Previous messages (up to `CHAT_HISTORY_MAX_TURNS * 2`) are loaded and sent to Gemini as multi-turn `contents` with alternating `user`/`model` roles. The current question's RAG context is always the final user message. Both user and assistant messages are saved after each interaction. The `conversation_id` is emitted in SSE `start` and `done` events so the frontend can track it.
 
+8. **Dual-engine architecture** — The system supports two RAG engines via `RAG_ENGINE_TYPE` env var (`"local"` or `"vertex"`). Local uses Docling+BGE-M3+Qdrant with Gemini for answer generation. Vertex uses Google Vertex AI RAG engine for both ingestion and retrieval (grounded content generation). The `is_vertex_engine` property in Settings routes ingestion and retrieval to the appropriate backend. Vertex AI ingestion downloads PDFs from Supabase, uploads to GCS bucket, triggers Vertex import, and polls the LRO for completion.
+
 ## Data Flow — Full Pipeline
 
 ```
@@ -85,23 +92,34 @@ POST /uploads/upload-pdf (maintainer, multipart PDFs)
 IngestionWorker (background, polls every WORKER_POLL_INTERVAL_SECONDS)
   → upload_repository.get_next_queued() (atomically sets QUEUED→RUNNING)
   → Download from Supabase Storage
-  → run_ingestion_pipeline():
-     1. PARSE: Docling (do_ocr=True, do_table_structure=True) → Markdown + DoclingDocument
-     2. CHUNK: normalize_markdown_headers() → MarkdownHeaderTextSplitter (h1/h2/h3)
-        → RecursiveCharacterTextSplitter → _inject_context(breadcrumb prefix)
-     3. EMBED: Local BGE-M3 (1024-dim, cosine normalized)
-     4. INDEX: QdrantCloudVectors.upsert (batch size 64, deterministic UUID via MD5 of filename+chunk_index)
-  → Update upload_jobs.status=COMPLETED|FAILED
-  → Delete local PDF temp
+  → If is_vertex_engine (RAG_ENGINE_TYPE=vertex):
+     1. _run_vertex_ingestion():
+        a. IngestionEngine.ingest() — uploads PDF to GCS bucket, triggers Vertex RAG import
+        b. StatusPoller.poll() — polls Vertex AI LRO until ingestion completes
+     2. Update upload_jobs.status=COMPLETED|FAILED
+     3. Delete local PDF temp
+  → If is_local_engine (RAG_ENGINE_TYPE=local, default):
+     1. run_ingestion_pipeline():
+        a. PARSE: Docling (do_ocr=True, do_table_structure=True) → Markdown + DoclingDocument
+        b. CHUNK: normalize_markdown_headers() → MarkdownHeaderTextSplitter (h1/h2/h3)
+           → RecursiveCharacterTextSplitter → _inject_context(breadcrumb prefix)
+        c. EMBED: Local BGE-M3 (1024-dim, cosine normalized)
+        d. INDEX: QdrantCloudVectors.upsert (batch size 64, deterministic UUID via MD5 of filename+chunk_index)
+     2. Update upload_jobs.status=COMPLETED|FAILED
+     3. Delete local PDF temp
 
 POST /ask (authenticated, SSE streaming default)
   → Resolve user_id from JWT username via UserRepository
   → If conversation_id provided: verify ownership, load last CHAT_HISTORY_MAX_TURNS*2 messages
   → If no conversation_id: auto-create conversation (title = question[:50])
-  → BGE-M3 embed query
-  → Qdrant search (top_k=RETRIEVAL_TOP_K, default 20, cosine)
-  → Figure-aware secondary search + legend boost if figure/diagnosis mention detected
-  → Build Gemini prompt: history messages + RAG context + current question
+  → If is_vertex_engine:
+     1. RetrievalEngine.ask() — AskContextsRequest to Vertex AI RAG corpus
+     2. Returns grounded answer with citations from Vertex AI
+  → If is_local_engine:
+     1. BGE-M3 embed query
+     2. Qdrant search (top_k=RETRIEVAL_TOP_K, default 20, cosine)
+     3. Figure-aware secondary search + legend boost if figure/diagnosis mention detected
+     4. Build Gemini prompt: history messages + RAG context + current question
   → Stream response via SSE (emits conversation_id in start/done events)
   → Save user message + assistant response to messages table
 
@@ -181,13 +199,21 @@ DELETE /conversations/{id} (authenticated)
 
 ## Status Flow for Upload Jobs
 
+**Local engine** (`RAG_ENGINE_TYPE=local`):
 ```
 QUEUED → RUNNING → PARSING → CHUNKING → EMBEDDING → INDEXING → COMPLETED
                                                       ↓
                                                   FAILED (at any point)
 ```
 
-Note: `run_ingestion_pipeline` uses statuses from `app.models.JobStatus` enum (e.g., `"PARSING"`, `"CHUNKING"`), while the worker and repository use `"QUEUED"`, `"RUNNING"`, `"COMPLETED"`, `"FAILED"`. The `update_status` method in `UploadRepository` handles both sets — they're strings in the DB.
+**Vertex engine** (`RAG_ENGINE_TYPE=vertex`):
+```
+QUEUED → RUNNING → COMPLETED
+              ↓
+           FAILED (at any point)
+```
+
+Note: `run_ingestion_pipeline` uses statuses from `app.models.JobStatus` enum (e.g., `"PARSING"`, `"CHUNKING"`), while the worker and repository use `"QUEUED"`, `"RUNNING"`, `"COMPLETED"`, `"FAILED"`. The `update_status` method in `UploadRepository` handles both sets — they're strings in the DB. Vertex AI ingestion skips the intermediate parsing/chunking/embedding/indexing statuses since Vertex handles all of that internally.
 
 ## Configuration (all env vars via `app/config.py` `Settings`)
 
@@ -196,8 +222,9 @@ Note: `run_ingestion_pipeline` uses statuses from `app.models.JobStatus` enum (e
 | SUPABASE_URL | Yes | — |
 | SUPABASE_SERVICE_KEY | Yes | — |
 | JWT_SECRET | Yes | — |
-| QDRANT_URL | Yes | — |
-| QDRANT_API_KEY | Yes | — |
+| RAG_ENGINE_TYPE | No | local |
+| QDRANT_URL | Yes (local) | — |
+| QDRANT_API_KEY | Yes (local) | — |
 | QDRANT_COLLECTION_NAME | No | medical_textbooks |
 | GEMINI_API_KEY | Yes | — |
 | GEMINI_MODEL | No | gemini-2.0-flash |
@@ -213,6 +240,10 @@ Note: `run_ingestion_pipeline` uses statuses from `app.models.JobStatus` enum (e
 | SEED_ADMIN_PASSWORD | No | Admin@1234 |
 | TEMP_UPLOAD_DIR | No | tmp_uploads |
 | CHAT_HISTORY_MAX_TURNS | No | 10 |
+| GOOGLE_CLOUD_PROJECT | Yes (vertex) | — |
+| GOOGLE_CLOUD_LOCATION | No | us-central1 |
+| GOOGLE_CLOUD_BUCKET | Yes (vertex) | — |
+| VERTEX_RAG_CORPUS_ID | Yes (vertex) | — |
 
 ## Roles & Permissions
 
@@ -256,9 +287,12 @@ The LLM is instructed to:
 ## Important Notes for Changes
 
 - **Never** introduce multi-worker parallelism — the system is designed for sequential processing.
-- **Never** remove context injection from chunks — it's critical for retrieval quality.
+- **Never** remove context injection from chunks — it's critical for retrieval quality (local engine only).
 - **Never** touch the Gemini system prompt's citation rules without understanding the `"(Document)"` bug it fixes.
 - **Never** instantiate services directly — always use the singleton accessors (`get_*()` functions).
+- **Vertex AI RAG engine**: When `RAG_ENGINE_TYPE=vertex`, ingestion uses Vertex AI's native import (no Docling/chunking/embedding needed) and retrieval uses `AskContextsRequest` for grounded answers. The `vertex_rag/__init__.py` must NOT import `RetrievalEngine` at module level — it triggers SDK version errors. Always import directly from `vertex_rag.retrieval` only when needed.
+- **Vertex AI ingestion flow**: Downloads PDF from Supabase → saves to `temp_upload_dir` → `IngestionEngine.ingest()` uploads to GCS and triggers Vertex import → `StatusPoller` polls the LRO → cleanup temp file.
+- **Vertex AI retrieval**: Uses `AskContextsRequest` with `rag_corpus` field pointing to the corpus resource path. The `rag_corpus` field is mandatory — omitting it causes `InvalidArgument` errors.
 - Qdrant collection name must match `QDRANT_COLLECTION_NAME` env var.
 - Supabase Storage bucket is hardcoded as `"mediRag"` in `api/uploads.py` and `workers/ingestion_worker.py`.
 - Admin seed in `seed.py` is called from the root module name `"seed"`, not `"seed.seed"`.

@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 
     from app.services.embeddings import get_embedding_service
     logger.info("Pre-warming LocalEmbeddingService (loading %s)...", settings.embedding_model)
-    get_embedding_service(settings)
+    #get_embedding_service(settings)
     logger.info("LocalEmbeddingService pre-warmed successfully.")
 
     from app.services.parsing import get_converter

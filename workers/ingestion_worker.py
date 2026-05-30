@@ -14,6 +14,30 @@ from utils.retry import retry_sync
 logger = logging.getLogger(__name__)
 
 
+def _run_vertex_ingestion(pdf_path: Path, filename: str) -> str:
+    """Run ingestion using Vertex AI RAG engine."""
+    from vertex_rag.config import VertexRAGConfig
+    from vertex_rag.ingestion import IngestionEngine
+    from vertex_rag.poller import StatusPoller
+
+    settings = get_settings()
+    config = VertexRAGConfig.from_env(
+        corpus_id=settings.vertex_rag_corpus_id,
+        bucket_name=settings.google_cloud_bucket,
+    )
+    
+    # Upload and trigger import
+    engine = IngestionEngine.from_config(config)
+    operation_name = engine.ingest(str(pdf_path))
+    logger.info("Vertex AI ingestion triggered. LRO: %s", operation_name)
+    
+    # Poll for completion (blocking)
+    poller = StatusPoller.from_config(config, poll_interval_seconds=30)
+    poller.poll(operation_name)
+    logger.info("Vertex AI ingestion completed for %s", filename)
+    return operation_name
+
+
 class IngestionWorker:
     def __init__(self, poll_interval: int = 60):
         self.interval = poll_interval
@@ -113,12 +137,24 @@ class IngestionWorker:
             pdf_path.write_bytes(content_bytes)
             logger.info("Saved PDF locally to: %s", pdf_path)
 
-            await asyncio.to_thread(
-                run_ingestion_pipeline,
-                job_id=job_id,
-                pdf_path=pdf_path,
-                filename=original_filename,
-            )
+            settings = get_settings()
+            
+            if settings.is_vertex_engine:
+                # Vertex AI ingestion (includes upload + poll)
+                await asyncio.to_thread(
+                    _run_vertex_ingestion,
+                    pdf_path=pdf_path,
+                    filename=original_filename,
+                )
+            else:
+                # Local ingestion (Docling + BGE-M3 + Qdrant)
+                await asyncio.to_thread(
+                    run_ingestion_pipeline,
+                    job_id=job_id,
+                    pdf_path=pdf_path,
+                    filename=original_filename,
+                )
+            
             current = repo.get_by_id(job_id)
             if current and current.get("status") != "COMPLETED":
                 repo.update_status(

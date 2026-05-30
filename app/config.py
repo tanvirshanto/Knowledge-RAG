@@ -10,14 +10,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # RAG Engine Selection: "local" (Docling+BGE-M3+Qdrant) or "vertex" (Google Vertex AI)
+    rag_engine_type: str = "local"
+
     # Local embeddings (BGE-M3)
     embedding_model: str = "BAAI/bge-m3"
     embedding_dimension: int = 1024
     embedding_batch_size: int = 32
 
     # Qdrant Cloud
-    qdrant_url: str
-    qdrant_api_key: str
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
     qdrant_collection_name: str = "medical_textbooks"
 
     # Google Gemini API
@@ -66,9 +69,23 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: str
 
+    # Google Cloud / Vertex AI RAG
+    google_cloud_project: str = ""
+    google_cloud_location: str = "us-central1"
+    google_cloud_bucket: str = ""
+    vertex_rag_corpus_id: str = ""
+
     @property
     def allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def is_vertex_engine(self) -> bool:
+        return self.rag_engine_type.lower() == "vertex"
+
+    @property
+    def is_local_engine(self) -> bool:
+        return self.rag_engine_type.lower() == "local"
 
 
 @lru_cache
