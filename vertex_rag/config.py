@@ -31,7 +31,10 @@ class VertexRAGConfig:
             GOOGLE_CLOUD_LOCATION: GCP region (e.g., us-central1)
         """
         project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "asia-east1")
+        chunk_size = os.environ.get("CHUNK_SIZE")
+        chunk_overlap = os.environ.get("CHUNK_OVERLAP")
+        retrieval_top_k = os.environ.get("RETRIEVAL_TOP_K")
         
         if not project_id:
             raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is required")
@@ -41,6 +44,9 @@ class VertexRAGConfig:
             location=location,
             corpus_id=corpus_id,
             bucket_name=bucket_name,
+            chunk_size=int(chunk_size),
+            chunk_overlap=int(chunk_overlap),
+            similarity_top_k=int(retrieval_top_k),
         )
     
     @property
